@@ -12,11 +12,20 @@
 
 #include "scpi.h"
 
+/** Possible SCPI function results */
 typedef enum{
 	SCPI_OK = 0,
 	SCPI_ERROR = 1,
 }SCPIResult;
 
+/** PER test result descriptor */
+typedef struct{
+	uint32_t testID;
+	uint16_t totalPacketsNumber;
+	uint16_t receivedPacketsNumber;
+}SCPI_ETSI_TEST_PERTestResult;
+
+/** PHY setting descriptor */
 typedef struct{
 	uint8_t phyNumber;
 	uint16_t channelNumber;
@@ -27,6 +36,7 @@ typedef struct{
 	uint16_t perPacketLength;
 }SCPI_ETSI_TEST_PhySettings;
 
+/** PHY capabilities descriptor */
 typedef struct{
 	uint32_t lowestFrequency;
 	uint32_t highestFrequency;
@@ -49,19 +59,40 @@ typedef struct{
 	uint16_t defaultPERPacketLength;
 }SCPI_ETSI_TEST_PhyCapabilities;
 
+/** type definition of handler to channel lists for each PHY */
 typedef uint32_t* SCPI_ETSI_TEST_PhyChannelList;
 
+/** device descriptor */
 typedef struct{
 	uint8_t phyCount;
 	const char* idn;
-	SCPI_ETSI_TEST_PhySettings phySet;
+	SCPI_ETSI_TEST_PhySettings phySettings;
 	const char** phyDescriptions;
-	const SCPI_ETSI_TEST_PhyCapabilities* phyCap;
+	const SCPI_ETSI_TEST_PhyCapabilities* phyCapabilities;
 	const SCPI_ETSI_TEST_PhyChannelList* phyChannelList;
 }SCPI_ETSI_TEST_DeviceDescriptor;
 
+/**
+ *  Initializes the SCPI parser and used data structures.
+ *
+ *  @return SCPI_OK on success or SCPI_ERROR otherwise
+*/
 SCPIResult SCPI_ETSI_TEST_Init(void);
+
+/**
+ *  Tries to receive characters from data input. When full command is received
+ *  calls parser function. Should be called periodically.
+ *
+ *  @return SCPI_OK on success or SCPI_ERROR otherwise
+*/
 SCPIResult SCPI_ETSI_TEST_Proc(void);
-void SCPI_ETSI_TEST_Send(scpi_t* context, const void* data, size_t size);
+
+/**
+ *  Sends given message into output using user's putchar method implementation
+ *
+ *  @param[in] data - address of data to send
+ *  @param[in] size - number of bytes to send
+*/
+void SCPI_ETSI_TEST_Send(const void* data, size_t size);
 
 #endif /* SCPI_ETSI_TEST_H_ */

@@ -56,6 +56,12 @@ static uint32_t* channelList[PHY_COUNT] = {
 	(uint32_t[]){868050000,868150000,868250000},
 };
 
+// flag informing that some PER test is running (when set)
+static bool isPERTestOn;
+
+// PER test result structure declaration
+static SCPI_ETSI_TEST_PERTestResult testResult;
+
 /**
  * THIS FUNCTION IS IMPLEMENTED BY THE USER.
  *
@@ -89,7 +95,7 @@ void SCPI_ETSI_TEST_USER_Init(SCPI_ETSI_TEST_DeviceDescriptor* deviceDescriptor)
 		deviceDescriptor->phyCount = PHY_COUNT;
 		deviceDescriptor->idn = idn;
 		deviceDescriptor->phyDescriptions = phyDescriptions;
-		deviceDescriptor->phyCap = phyCapabilities;
+		deviceDescriptor->phyCapabilities = phyCapabilities;
 		deviceDescriptor->phyChannelList = channelList;
 	}
 }
@@ -99,8 +105,77 @@ void SCPI_ETSI_TEST_USER_Init(SCPI_ETSI_TEST_DeviceDescriptor* deviceDescriptor)
  *
  * Resets the device.
  */
-void SCPI_ETSI_TEST_USER_Reset() {
+void SCPI_ETSI_TEST_USER_Reset(SCPI_ETSI_TEST_DeviceDescriptor* deviceDescriptor) {
 	printf("Running SCPI_ETSI_TEST_USER_Reset\n");
+}
+
+/**
+ * THIS FUNCTION IS IMPLEMENTED BY THE USER.
+ *
+ * Sets the transceiver mode of operation
+ * 0 = TRX disabled, no reception and no transmissions (OFF)
+ * 1 = enable radio transmission (TX)
+ * 2 = enable radio reception (RX)
+ * @param[inout] deviceDescriptor pointer to the device descriptor structure
+ * @param[in] mode number describing transceiver operation mode
+ * @return true on success, false otherwise
+ */
+bool SCPI_ETSI_TEST_USER_SetTRXMode(SCPI_ETSI_TEST_DeviceDescriptor* deviceDescriptor, uint8_t mode){
+	// configuration of transceiver using data stored in phySettings structure
+	if(mode == 0){
+		printf("TRX off\n");
+	}
+	else if(mode == 1){
+		printf("TRX enabled radio transmission (TX)\n");
+	}
+	else if(mode == 2){
+		printf("TRX enabled radio reception (RX)\n");
+	}
+	return true;
+}
+
+/**
+ * THIS FUNCTION IS IMPLEMENTED BY THE USER.
+ *
+ * Starts Packet Error Rate (PER) test. This command is issued to the device being the source of packets in a PER test.
+ * @param[inout] deviceDescriptor pointer to the device descriptor structure
+ * @param[in] testID identification number of PER test
+ * @return true on success, false otherwise
+ */
+bool SCPI_ETSI_TEST_USER_StartPERTest(SCPI_ETSI_TEST_DeviceDescriptor* deviceDescriptor, uint32_t testID){
+	// starting PER test using data stored in phySettings structure and given testID
+	if(deviceDescriptor){
+		testResult.testID = testID;
+		testResult.totalPacketsNumber = deviceDescriptor->phySettings.perTotalPacketsNumber;
+		isPERTestOn = true;
+		return true;
+	}
+	return false;
+}
+
+/**
+ * THIS FUNCTION IS IMPLEMENTED BY THE USER.
+ *
+ * Checks if there is an ongoing PER test.
+ * @param[inout] deviceDescriptor pointer to the device descriptor structure
+ * @return true when some PER test is running, false otherwise
+ */
+bool SCPI_ETSI_TEST_USER_IsPERTestRunning(SCPI_ETSI_TEST_DeviceDescriptor* deviceDescriptor){
+	return isPERTestOn;
+}
+
+/**
+ * THIS FUNCTION IS IMPLEMENTED BY THE USER.
+ *
+ * Gets the result of a PER test.
+ * @param[inout] deviceDescriptor pointer to the device descriptor structure
+ * @return address of structure storing information about PER test result
+ */
+SCPI_ETSI_TEST_PERTestResult* SCPI_ETSI_TEST_USER_GetPERTestResult(SCPI_ETSI_TEST_DeviceDescriptor* deviceDescriptor){
+	// returning address of filled per test result data structure
+	// it's not necessary to fill structure inside this method, if it has been done somewhere else
+	testResult.receivedPacketsNumber = 973;
+	return &testResult;
 }
 
 int main(void) {

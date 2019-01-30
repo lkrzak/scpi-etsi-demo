@@ -38,7 +38,7 @@ enum {
 #define SCPI_ERROR_QUEUE_SIZE 17
 #endif
 
-
+// declaration of functions called when given SCPI command appears
 scpi_result_t SCPI_ETSI_TEST_GetIDN(scpi_t* context);
 scpi_result_t SCPI_ETSI_TEST_Reset(scpi_t* context);
 scpi_result_t SCPI_ETSI_TEST_GetPhyCount(scpi_t* context);
@@ -73,12 +73,16 @@ scpi_result_t SCPI_ETSI_TEST_SetPERTotalPackets(scpi_t* context);
 scpi_result_t SCPI_ETSI_TEST_GetSelectedPERTotalPackets(scpi_t* context);
 scpi_result_t SCPI_ETSI_TEST_SetPERPacketLength(scpi_t* context);
 scpi_result_t SCPI_ETSI_TEST_GetSelectedPERPacketLength(scpi_t* context);
-
+scpi_result_t SCPI_ETSI_TEST_SetTRXMode(scpi_t* context);
+scpi_result_t SCPI_ETSI_TEST_StartPERTest(scpi_t* context);
+scpi_result_t SCPI_ETSI_TEST_IsPERTestRunning(scpi_t* context);
+scpi_result_t SCPI_ETSI_TEST_GetPERTestResult(scpi_t* context);
 
 static scpi_error_t scpiErrorBuffer[SCPI_ERROR_QUEUE_SIZE];
 static char scpiInputBuffer[SCPI_INPUT_BUFFER_LENGTH];
 static char commandBuffer[SCPI_COMMAND_BUFFER_LENGTH];
 
+// handled SCPI command list
 static const scpi_command_t scpiCommands[] = {
 										{ .pattern = "*IDN?", 							.callback = SCPI_ETSI_TEST_GetIDN, },
 										{ .pattern = "*RST",							.callback = SCPI_ETSI_TEST_Reset, },
@@ -114,6 +118,10 @@ static const scpi_command_t scpiCommands[] = {
 										{ .pattern = "SETtings:PER:TOTALpackets?",		.callback = SCPI_ETSI_TEST_GetSelectedPERTotalPackets, },
 										{ .pattern = "SETtings:PER:PCKTLENgth",			.callback = SCPI_ETSI_TEST_SetPERPacketLength, },
 										{ .pattern = "SETtings:PER:PCKTLENgth?",		.callback = SCPI_ETSI_TEST_GetSelectedPERPacketLength, },
+										{ .pattern = "TRXmode",							.callback = SCPI_ETSI_TEST_SetTRXMode, },
+										{ .pattern = "PER",								.callback = SCPI_ETSI_TEST_StartPERTest, },
+										{ .pattern = "PER?",							.callback = SCPI_ETSI_TEST_IsPERTestRunning, },
+										{ .pattern = "PERRESULT?",						.callback = SCPI_ETSI_TEST_GetPERTestResult, },
 										SCPI_CMD_LIST_END };
 
 static scpi_interface_t scpiInterface = {   .write = NULL,
@@ -156,13 +164,11 @@ SCPIResult SCPI_ETSI_TEST_Proc(void){
 	return result;
 }
 
-void SCPI_ETSI_TEST_Send(scpi_t* context, const void* data, size_t size){
-	if(NULL != context) {
-		if(NULL != data) {
-			for(int chunk=0; chunk<size; chunk++){
-				const char* wordStart = data;
-				SCPI_ETSI_TEST_USER_PutChar(*(wordStart+chunk));
-			}
+void SCPI_ETSI_TEST_Send(const void* data, size_t size){
+	if(NULL != data) {
+		for(int chunk=0; chunk<size; chunk++){
+			const char* wordStart = data;
+			SCPI_ETSI_TEST_USER_PutChar(*(wordStart+chunk));
 		}
 	}
 }
@@ -173,21 +179,21 @@ scpi_result_t SCPI_ETSI_TEST_GetIDN(scpi_t* context){
 		const char* description = deviceDesc.idn;
 		if(NULL != description){
 			snprintf(buffer, sizeof(buffer), "%s\n", description);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
 scpi_result_t SCPI_ETSI_TEST_Reset(scpi_t* context){
 	if(NULL != context) {
-		SCPI_ETSI_TEST_Send(context, "OK\n", 3);
-		SCPI_ETSI_TEST_USER_Reset();
+		SCPI_ETSI_TEST_Send("OK\n", 3);
+		SCPI_ETSI_TEST_USER_Reset(&deviceDesc);
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -196,10 +202,10 @@ scpi_result_t SCPI_ETSI_TEST_GetPhyCount(scpi_t* context){
 		char buffer[UINT8_BUFF_SIZE];
 		const uint8_t phyCount = deviceDesc.phyCount;
 		snprintf(buffer, sizeof(buffer), "%u\n", phyCount);
-		SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -209,16 +215,16 @@ scpi_result_t SCPI_ETSI_TEST_GetPhyCapabilities(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			snprintf(buffer, sizeof(buffer), "%"PRIu32",%"PRIu32",%"PRIu16",%"PRIu32",%"PRIu32",%i,%i,%i,%"PRIu16",%"PRIu16",%"PRIu16",%u,%u,%u\n", deviceDesc.phyCap[phy].lowestFrequency,
-					deviceDesc.phyCap[phy].highestFrequency, deviceDesc.phyCap[phy].channelCount, deviceDesc.phyCap[phy].channelBandwidth, deviceDesc.phyCap[phy].baudrate,
-					deviceDesc.phyCap[phy].lowestPower, deviceDesc.phyCap[phy].highestPower, deviceDesc.phyCap[phy].defaultPower, deviceDesc.phyCap[phy].minimalPacketLength,
-					deviceDesc.phyCap[phy].maximalPacketLength, deviceDesc.phyCap[phy].defaultPERPacketLength, deviceDesc.phyCap[phy].modulationType, deviceDesc.phyCap[phy].supportedSignals,
-					deviceDesc.phyCap[phy].antennaCount);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			snprintf(buffer, sizeof(buffer), "%"PRIu32",%"PRIu32",%"PRIu16",%"PRIu32",%"PRIu32",%i,%i,%i,%"PRIu16",%"PRIu16",%"PRIu16",%u,%u,%u\n", deviceDesc.phyCapabilities[phy].lowestFrequency,
+					deviceDesc.phyCapabilities[phy].highestFrequency, deviceDesc.phyCapabilities[phy].channelCount, deviceDesc.phyCapabilities[phy].channelBandwidth, deviceDesc.phyCapabilities[phy].baudrate,
+					deviceDesc.phyCapabilities[phy].lowestPower, deviceDesc.phyCapabilities[phy].highestPower, deviceDesc.phyCapabilities[phy].defaultPower, deviceDesc.phyCapabilities[phy].minimalPacketLength,
+					deviceDesc.phyCapabilities[phy].maximalPacketLength, deviceDesc.phyCapabilities[phy].defaultPERPacketLength, deviceDesc.phyCapabilities[phy].modulationType, deviceDesc.phyCapabilities[phy].supportedSignals,
+					deviceDesc.phyCapabilities[phy].antennaCount);
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -228,13 +234,13 @@ scpi_result_t SCPI_ETSI_TEST_GetLowestFrequency(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint32_t freq = deviceDesc.phyCap[phy].lowestFrequency;
+			const uint32_t freq = deviceDesc.phyCapabilities[phy].lowestFrequency;
 			snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", freq);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -244,13 +250,13 @@ scpi_result_t SCPI_ETSI_TEST_GetHighestFrequency(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint32_t freq = deviceDesc.phyCap[phy].highestFrequency;
+			const uint32_t freq = deviceDesc.phyCapabilities[phy].highestFrequency;
 			snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", freq);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -260,13 +266,13 @@ scpi_result_t SCPI_ETSI_TEST_GetChannelCount(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint16_t channelCount = deviceDesc.phyCap[phy].channelCount;
+			const uint16_t channelCount = deviceDesc.phyCapabilities[phy].channelCount;
 			snprintf(buffer, sizeof(buffer), "%"PRIu16"\n", channelCount);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -276,13 +282,13 @@ scpi_result_t SCPI_ETSI_TEST_GetChannelBandwidth(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint32_t channelBandwidth = deviceDesc.phyCap[phy].channelBandwidth;
+			const uint32_t channelBandwidth = deviceDesc.phyCapabilities[phy].channelBandwidth;
 			snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", channelBandwidth);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -292,13 +298,13 @@ scpi_result_t SCPI_ETSI_TEST_GetBaudrate(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint32_t baudrate = deviceDesc.phyCap[phy].baudrate;
+			const uint32_t baudrate = deviceDesc.phyCapabilities[phy].baudrate;
 			snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", baudrate);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -308,13 +314,13 @@ scpi_result_t SCPI_ETSI_TEST_GetLowestPower(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const int8_t power = deviceDesc.phyCap[phy].lowestPower;
+			const int8_t power = deviceDesc.phyCapabilities[phy].lowestPower;
 			snprintf(buffer, sizeof(buffer), "%i\n", power);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -324,13 +330,13 @@ scpi_result_t SCPI_ETSI_TEST_GetHighestPower(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const int8_t power = deviceDesc.phyCap[phy].highestPower;
+			const int8_t power = deviceDesc.phyCapabilities[phy].highestPower;
 			snprintf(buffer, sizeof(buffer), "%i\n", power);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -340,13 +346,13 @@ scpi_result_t SCPI_ETSI_TEST_GetMinPacketLength(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint16_t pktLen = deviceDesc.phyCap[phy].minimalPacketLength;
+			const uint16_t pktLen = deviceDesc.phyCapabilities[phy].minimalPacketLength;
 			snprintf(buffer, sizeof(buffer), "%"PRIu16"\n", pktLen);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -356,13 +362,13 @@ scpi_result_t SCPI_ETSI_TEST_GetMaxPacketLength(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint16_t pktLen = deviceDesc.phyCap[phy].maximalPacketLength;
+			const uint16_t pktLen = deviceDesc.phyCapabilities[phy].maximalPacketLength;
 			snprintf(buffer, sizeof(buffer), "%"PRIu16"\n", pktLen);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -372,13 +378,13 @@ scpi_result_t SCPI_ETSI_TEST_GetModulationType(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint8_t mod = deviceDesc.phyCap[phy].modulationType;
+			const uint8_t mod = deviceDesc.phyCapabilities[phy].modulationType;
 			snprintf(buffer, sizeof(buffer), "%u\n", mod);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -388,13 +394,13 @@ scpi_result_t SCPI_ETSI_TEST_GetSupportedSignals(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint8_t signals = deviceDesc.phyCap[phy].supportedSignals;
+			const uint8_t signals = deviceDesc.phyCapabilities[phy].supportedSignals;
 			snprintf(buffer, sizeof(buffer), "%u\n", signals);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -404,13 +410,13 @@ scpi_result_t SCPI_ETSI_TEST_GetAntennaCount(scpi_t* context){
 		int32_t phy;
 		SCPI_CommandNumbers(context, &phy, 1, 0);
 		if(phy <= deviceDesc.phyCount-1){
-			const uint8_t antennaCount = deviceDesc.phyCap[phy].antennaCount;
+			const uint8_t antennaCount = deviceDesc.phyCapabilities[phy].antennaCount;
 			snprintf(buffer, sizeof(buffer), "%u\n", antennaCount);
-			SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -423,12 +429,12 @@ scpi_result_t SCPI_ETSI_TEST_GetPhyDescription(scpi_t* context){
 			const char* description = *(deviceDesc.phyDescriptions+phy);
 			if(NULL != description){
 				snprintf(buffer, sizeof(buffer), "%s\n", description);
-				SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+				SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 				return SCPI_RES_OK;
 			}
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -440,20 +446,20 @@ scpi_result_t SCPI_ETSI_TEST_GetChannelList(scpi_t* context){
 		if(phy <= deviceDesc.phyCount-1){
 			const uint32_t* channelList = *deviceDesc.phyChannelList;
 			if(NULL != channelList){
-				for(int channel=0; channel < deviceDesc.phyCap[phy].channelCount; channel++){
-					if(channel == deviceDesc.phyCap[phy].channelCount-1){
+				for(int channel=0; channel < deviceDesc.phyCapabilities[phy].channelCount; channel++){
+					if(channel == deviceDesc.phyCapabilities[phy].channelCount-1){
 						snprintf(buffer, sizeof(buffer), "%d,%d\n", channel, channelList[channel]);
-						SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+						SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 					} else{
 						snprintf(buffer, sizeof(buffer), "%d,%d;", channel, channelList[channel]);
-						SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+						SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 					}
 				}
 				return SCPI_RES_OK;
 			}
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -467,29 +473,29 @@ scpi_result_t SCPI_ETSI_TEST_GetChannel(scpi_t* context){
 		if(phy <= deviceDesc.phyCount-1){
 			const uint32_t* channelList = *deviceDesc.phyChannelList;
 			if(NULL != channelList){
-				if(channelNumber <= deviceDesc.phyCap[phy].channelCount - 1){
+				if(channelNumber <= deviceDesc.phyCapabilities[phy].channelCount - 1){
 					const uint32_t channelFreq = channelList[channelNumber];
 					snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", channelFreq);
-					SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+					SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 					return SCPI_RES_OK;
 				}
 			}
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
 scpi_result_t SCPI_ETSI_TEST_GetSettings(scpi_t* context){
 	if(NULL != context) {
 		char buffer[128];
-		snprintf(buffer, sizeof(buffer), "%u,%"PRIu16",%i,%u,%u,%"PRIu16",%"PRIu16"\n", deviceDesc.phySet.phyNumber, deviceDesc.phySet.channelNumber,
-				deviceDesc.phySet.signalType, deviceDesc.phySet.power, deviceDesc.phySet.antennaNumber, deviceDesc.phySet.perTotalPacketsNumber,
-				deviceDesc.phySet.perPacketLength);
-		SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+		snprintf(buffer, sizeof(buffer), "%u,%"PRIu16",%u,%i,%u,%"PRIu16",%"PRIu16"\n", deviceDesc.phySettings.phyNumber, deviceDesc.phySettings.channelNumber,
+				deviceDesc.phySettings.signalType, deviceDesc.phySettings.power, deviceDesc.phySettings.antennaNumber, deviceDesc.phySettings.perTotalPacketsNumber,
+				deviceDesc.phySettings.perPacketLength);
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -498,30 +504,47 @@ scpi_result_t SCPI_ETSI_TEST_SetPhy(scpi_t* context){
 		uint32_t phy;
 		if(SCPI_ParamUInt32(context, &phy, TRUE)){
 			if(phy <= deviceDesc.phyCount-1){
-				// do you want to change phy to another, or just try to set current one ?
-				if(phy != deviceDesc.phySet.phyNumber){
-					// if yes clear existing settings structure and set new phy
-					memset(&(deviceDesc.phySet), 0, sizeof(SCPI_ETSI_TEST_PhySettings));
-					deviceDesc.phySet.phyNumber = (uint8_t)phy;
+				// if yes clear existing settings structure and set new phy
+				memset(&(deviceDesc.phySettings), 0, sizeof(SCPI_ETSI_TEST_PhySettings));
+				deviceDesc.phySettings.phyNumber = (uint8_t)phy;
+				// then fill up with default settings
+				// check each one if it has proper default value
+				if(deviceDesc.phyCapabilities[phy].defaultChannelNumber <= (deviceDesc.phyCapabilities[phy].channelCount - 1)){
+					deviceDesc.phySettings.channelNumber = deviceDesc.phyCapabilities[phy].defaultChannelNumber;
 				}
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+				if(deviceDesc.phyCapabilities[phy].defaultSignalType <= deviceDesc.phyCapabilities[phy].supportedSignals){
+					deviceDesc.phySettings.signalType = deviceDesc.phyCapabilities[phy].defaultSignalType;
+				}
+				if((deviceDesc.phyCapabilities[phy].defaultPower <= deviceDesc.phyCapabilities[phy].highestPower)
+									&& (deviceDesc.phyCapabilities[phy].defaultPower >= deviceDesc.phyCapabilities[phy].lowestPower)){
+					deviceDesc.phySettings.power = deviceDesc.phyCapabilities[phy].defaultPower;
+				}
+				if(deviceDesc.phyCapabilities[phy].defaultAntennaNumber <= deviceDesc.phyCapabilities[phy].antennaCount){
+					deviceDesc.phySettings.antennaNumber = deviceDesc.phyCapabilities[phy].defaultAntennaNumber;
+				}
+				deviceDesc.phySettings.perTotalPacketsNumber = deviceDesc.phyCapabilities[phy].defaultPERTotalPacketsNumber;
+				if((deviceDesc.phyCapabilities[phy].defaultPERPacketLength <= deviceDesc.phyCapabilities[phy].maximalPacketLength)
+								&& (deviceDesc.phyCapabilities[phy].defaultPERPacketLength >= deviceDesc.phyCapabilities[phy].minimalPacketLength)){
+					deviceDesc.phySettings.perPacketLength = deviceDesc.phyCapabilities[phy].defaultPERPacketLength;
+				}
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
 			}
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
 scpi_result_t SCPI_ETSI_TEST_GetSelectedPhy(scpi_t* context){
 	if(NULL != context) {
-		char buffer[5];
-		const uint8_t phy = deviceDesc.phySet.phyNumber;
+		char buffer[UINT8_BUFF_SIZE];
+		const uint8_t phy = deviceDesc.phySettings.phyNumber;
 		snprintf(buffer, sizeof(buffer), "%u\n", phy);
-		SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -530,33 +553,33 @@ scpi_result_t SCPI_ETSI_TEST_SetChannel(scpi_t* context){
 		uint32_t channel;
 		// if user put a value into command use it, otherwise use default
 		if(SCPI_ParamUInt32(context, &channel, TRUE)){
-			if(channel <= (deviceDesc.phyCap[deviceDesc.phySet.phyNumber].channelCount - 1)){
-				deviceDesc.phySet.channelNumber = (uint16_t)channel;
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			if(channel <= (deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].channelCount - 1)){
+				deviceDesc.phySettings.channelNumber = (uint16_t)channel;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
 			}
 		} else{
 			// check if default value can be set (is not out of range)
-			if(deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultChannelNumber <= (deviceDesc.phyCap[deviceDesc.phySet.phyNumber].channelCount - 1)){
-				deviceDesc.phySet.channelNumber = deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultChannelNumber;
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			if(deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultChannelNumber <= (deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].channelCount - 1)){
+				deviceDesc.phySettings.channelNumber = deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultChannelNumber;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
 			}
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
 scpi_result_t SCPI_ETSI_TEST_GetSelectedChannel(scpi_t* context){
 	if(NULL != context) {
-		char buffer[6];
-		const uint16_t channel = deviceDesc.phySet.channelNumber;
+		char buffer[UINT16_BUFF_SIZE];
+		const uint16_t channel = deviceDesc.phySettings.channelNumber;
 		snprintf(buffer, sizeof(buffer), "%"PRIu16"\n", channel);
-		SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -565,33 +588,33 @@ scpi_result_t SCPI_ETSI_TEST_SetSignal(scpi_t* context){
 		uint32_t signal;
 		// if user put a value into command use it, otherwise use default
 		if(SCPI_ParamUInt32(context, &signal, TRUE)){
-			if(signal <= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].supportedSignals){
-				deviceDesc.phySet.signalType = (uint8_t)signal;
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			if(signal <= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].supportedSignals){
+				deviceDesc.phySettings.signalType = (uint8_t)signal;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
 			}
 		} else{
 			// check if default value can be set (is not out of range)
-			if(deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultSignalType <= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].supportedSignals){
-				deviceDesc.phySet.signalType = deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultSignalType;
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			if(deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultSignalType <= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].supportedSignals){
+				deviceDesc.phySettings.signalType = deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultSignalType;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
 			}
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
 scpi_result_t SCPI_ETSI_TEST_GetSelectedSignal(scpi_t* context){
 	if(NULL != context) {
-		char buffer[5];
-		const uint8_t signal = deviceDesc.phySet.signalType;
+		char buffer[UINT8_BUFF_SIZE];
+		const uint8_t signal = deviceDesc.phySettings.signalType;
 		snprintf(buffer, sizeof(buffer), "%u\n", signal);
-		SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -600,34 +623,34 @@ scpi_result_t SCPI_ETSI_TEST_SetPower(scpi_t* context){
 		int32_t power;
 		// if user put a value into command use it, otherwise use default
 		if(SCPI_ParamInt32(context, &power, TRUE)){
-			if((power <= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].highestPower) && (power >= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].lowestPower)){
-				deviceDesc.phySet.power = (int8_t)power;
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			if((power <= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].highestPower) && (power >= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].lowestPower)){
+				deviceDesc.phySettings.power = (int8_t)power;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
-			} else{
-				// check if default value can be set (is not out of range)
-				if((deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultPower <= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].highestPower)
-					&& (deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultPower >= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].lowestPower)){
-					deviceDesc.phySet.power = deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultPower;
-					SCPI_ETSI_TEST_Send(context, "OK\n", 3);
-					return SCPI_RES_OK;
-				}
+			}
+		} else{
+			// check if default value can be set (is not out of range)
+			if((deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultPower <= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].highestPower)
+				&& (deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultPower >= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].lowestPower)){
+				deviceDesc.phySettings.power = deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultPower;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
+				return SCPI_RES_OK;
 			}
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
 scpi_result_t SCPI_ETSI_TEST_GetSelectedPower(scpi_t* context){
 	if(NULL != context) {
-		char buffer[6];
-		const int8_t power = deviceDesc.phySet.power;
+		char buffer[INT8_BUFF_SIZE];
+		const int8_t power = deviceDesc.phySettings.power;
 		snprintf(buffer, sizeof(buffer), "%d\n", power);
-		SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -636,33 +659,33 @@ scpi_result_t SCPI_ETSI_TEST_SetAntenna(scpi_t* context){
 		uint32_t antenna;
 		// if user put a value into command use it, otherwise use default
 		if(SCPI_ParamUInt32(context, &antenna, TRUE)){
-			if(antenna <= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].antennaCount){
-				deviceDesc.phySet.antennaNumber = (uint8_t)antenna;
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			if(antenna <= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].antennaCount){
+				deviceDesc.phySettings.antennaNumber = (uint8_t)antenna;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
 			}
 		} else{
 			// check if default value can be set (is not out of range)
-			if(deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultAntennaNumber <= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].antennaCount){
-				deviceDesc.phySet.antennaNumber = deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultAntennaNumber;
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			if(deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultAntennaNumber <= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].antennaCount){
+				deviceDesc.phySettings.antennaNumber = deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultAntennaNumber;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
 			}
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
 scpi_result_t SCPI_ETSI_TEST_GetSelectedAntenna(scpi_t* context){
 	if(NULL != context) {
-		char buffer[5];
-		const uint8_t antenna = deviceDesc.phySet.antennaNumber;
+		char buffer[UINT8_BUFF_SIZE];
+		const uint8_t antenna = deviceDesc.phySettings.antennaNumber;
 		snprintf(buffer, sizeof(buffer), "%u\n", antenna);
-		SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -671,28 +694,28 @@ scpi_result_t SCPI_ETSI_TEST_SetPERTotalPackets(scpi_t* context){
 		uint32_t packets;
 		// if user put a value into command use it, otherwise use default
 		if(SCPI_ParamUInt32(context, &packets, TRUE)){
-			deviceDesc.phySet.perTotalPacketsNumber = (uint16_t)packets;
-			SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			deviceDesc.phySettings.perTotalPacketsNumber = (uint16_t)packets;
+			SCPI_ETSI_TEST_Send("OK\n", 3);
 			return SCPI_RES_OK;
 		} else{
-			deviceDesc.phySet.perTotalPacketsNumber = deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultPERTotalPacketsNumber;
-			SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			deviceDesc.phySettings.perTotalPacketsNumber = deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultPERTotalPacketsNumber;
+			SCPI_ETSI_TEST_Send("OK\n", 3);
 			return SCPI_RES_OK;
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
 scpi_result_t SCPI_ETSI_TEST_GetSelectedPERTotalPackets(scpi_t* context){
 	if(NULL != context) {
-		char buffer[6];
-		const uint16_t packets = deviceDesc.phySet.perTotalPacketsNumber;
+		char buffer[UINT16_BUFF_SIZE];
+		const uint16_t packets = deviceDesc.phySettings.perTotalPacketsNumber;
 		snprintf(buffer, sizeof(buffer), "%"PRIu16"\n", packets);
-		SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
@@ -701,33 +724,96 @@ scpi_result_t SCPI_ETSI_TEST_SetPERPacketLength(scpi_t* context){
 		uint32_t packetLen;
 		// if user put a value into command use it, otherwise use default
 		if(SCPI_ParamUInt32(context, &packetLen, TRUE)){
-			if((packetLen <= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].maximalPacketLength) && (packetLen >= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].minimalPacketLength)){
-				deviceDesc.phySet.perPacketLength = (uint8_t)packetLen;
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			if((packetLen <= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].maximalPacketLength) && (packetLen >= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].minimalPacketLength)){
+				deviceDesc.phySettings.perPacketLength = (uint8_t)packetLen;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
 			}
 		} else{
 			// check if default value can be set (is not out of range)
-			if((deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultPERPacketLength <= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].maximalPacketLength)
-				&& (deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultPERPacketLength >= deviceDesc.phyCap[deviceDesc.phySet.phyNumber].minimalPacketLength)){
-				deviceDesc.phySet.perPacketLength = deviceDesc.phyCap[deviceDesc.phySet.phyNumber].defaultPERPacketLength;
-				SCPI_ETSI_TEST_Send(context, "OK\n", 3);
+			if((deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultPERPacketLength <= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].maximalPacketLength)
+				&& (deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultPERPacketLength >= deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].minimalPacketLength)){
+				deviceDesc.phySettings.perPacketLength = deviceDesc.phyCapabilities[deviceDesc.phySettings.phyNumber].defaultPERPacketLength;
+				SCPI_ETSI_TEST_Send("OK\n", 3);
 				return SCPI_RES_OK;
 			}
 		}
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
 
 scpi_result_t SCPI_ETSI_TEST_GetSelectedPERPacketLength(scpi_t* context){
 	if(NULL != context) {
-		char buffer[6];
-		const uint16_t packetLen = deviceDesc.phySet.perPacketLength;
+		char buffer[UINT16_BUFF_SIZE];
+		const uint16_t packetLen = deviceDesc.phySettings.perPacketLength;
 		snprintf(buffer, sizeof(buffer), "%"PRIu16"\n", packetLen);
-		SCPI_ETSI_TEST_Send(context, buffer, strlen(buffer));
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
 		return SCPI_RES_OK;
 	}
-	SCPI_ETSI_TEST_Send(context, "ERR\n", 4);
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
+	return SCPI_RES_ERR;
+}
+
+scpi_result_t SCPI_ETSI_TEST_SetTRXMode(scpi_t* context){
+	if(NULL != context) {
+		uint32_t mode;
+		if(SCPI_ParamUInt32(context, &mode, TRUE)){
+			// check if parameter has proper value (0,1 or 2)
+			if(mode == 0 || mode == 1 || mode == 2){
+				if(true == SCPI_ETSI_TEST_USER_SetTRXMode(&deviceDesc, (uint8_t)mode)){
+					SCPI_ETSI_TEST_Send("OK\n", 3);
+					return SCPI_RES_OK;
+				} else{
+					SCPI_ETSI_TEST_Send("ERR\n", 4);
+					return SCPI_RES_ERR;
+				}
+			}
+		}
+	}
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
+	return SCPI_RES_ERR;
+}
+
+scpi_result_t SCPI_ETSI_TEST_StartPERTest(scpi_t* context){
+	if(NULL != context) {
+		uint32_t testID;
+		if(SCPI_ParamUInt32(context, &testID, TRUE)){
+			// check if any test is running at the moment
+			if(false == SCPI_ETSI_TEST_USER_IsPERTestRunning(&deviceDesc)){
+				if(true == SCPI_ETSI_TEST_USER_StartPERTest(&deviceDesc, testID)){
+					SCPI_ETSI_TEST_Send("OK\n", 3);
+					return SCPI_RES_OK;
+				}
+			}
+		}
+	}
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
+	return SCPI_RES_ERR;
+}
+
+scpi_result_t SCPI_ETSI_TEST_IsPERTestRunning(scpi_t* context){
+	if(NULL != context) {
+		char buffer[UINT8_BUFF_SIZE];
+		const bool testStatus = SCPI_ETSI_TEST_USER_IsPERTestRunning(&deviceDesc);
+		snprintf(buffer, sizeof(buffer), "%d\n", testStatus);
+		SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
+		return SCPI_RES_OK;
+	}
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
+	return SCPI_RES_ERR;
+}
+
+scpi_result_t SCPI_ETSI_TEST_GetPERTestResult(scpi_t* context){
+	if(NULL != context) {
+		char buffer[100];
+		SCPI_ETSI_TEST_PERTestResult* testResult = SCPI_ETSI_TEST_USER_GetPERTestResult(&deviceDesc);
+		if(NULL != testResult){
+			snprintf(buffer, sizeof(buffer), "%"PRIu32",%"PRIu16",%"PRIu16"\n", testResult->testID, testResult->totalPacketsNumber, testResult->receivedPacketsNumber);
+			SCPI_ETSI_TEST_Send(buffer, strlen(buffer));
+			return SCPI_RES_OK;
+		}
+	}
+	SCPI_ETSI_TEST_Send("ERR\n", 4);
 	return SCPI_RES_ERR;
 }
