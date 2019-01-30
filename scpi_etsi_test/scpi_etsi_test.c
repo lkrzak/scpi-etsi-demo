@@ -15,6 +15,7 @@
 #include "scpi.h"
 #include "scpi_etsi_test_user.h"
 
+// buffer size macros for different types to help printing (considering max number of characters and additional new line character)
 enum {
 	UINT8_BUFF_SIZE = 4,
 	INT8_BUFF_SIZE = 5,
@@ -22,6 +23,7 @@ enum {
 	INT16_BUFF_SIZE = 7,
 	UINT32_BUFF_SIZE = 11,
 	INT32_BUFF_SIZE = 12,
+	STRING_BUFF_SIZE = 256,
 };
 
 #define SCPI_READ_TERMINATION_CHARACTER '\n'
@@ -129,14 +131,18 @@ static scpi_interface_t scpiInterface = {   .write = NULL,
 											.reset = NULL,
 											.flush = NULL, };
 
+// device structure descriptor
 static SCPI_ETSI_TEST_DeviceDescriptor deviceDesc;
+// scpi parser handler
 static scpi_t scpiContext;
 
 SCPIResult SCPI_ETSI_TEST_Init(void){
 	if(NULL != scpiInputBuffer){
 		if(NULL != scpiErrorBuffer){
+			// initialize parser library
 			SCPI_Init(&scpiContext, scpiCommands, &scpiInterface, scpi_units_def, NULL, NULL, NULL, NULL, scpiInputBuffer,
 					SCPI_INPUT_BUFFER_LENGTH, scpiErrorBuffer, SCPI_ERROR_QUEUE_SIZE);
+			// initialize user implementation (filling up data structures)
 			SCPI_ETSI_TEST_USER_Init(&deviceDesc);
 			return SCPI_OK;
 		}
@@ -148,10 +154,14 @@ SCPIResult SCPI_ETSI_TEST_Proc(void){
 	SCPIResult result = SCPI_ERROR;
 	uint8_t byte = 0;
 	if(NULL != commandBuffer){
+		// try to get character from input at least once
 		do{
+			// check if there is antyhing to receive
 			if(true == SCPI_ETSI_TEST_USER_GetChar(&commandBuffer[byte])){
 				if(commandBuffer[byte] != 0){
+					// check if received character is not a communication termination character
 					if(SCPI_READ_TERMINATION_CHARACTER == commandBuffer[byte]){
+						// if you get termination character start parsing received command
 						SCPI_Input(&scpiContext, commandBuffer, byte+1);
 						result = SCPI_OK;
 						break;
@@ -166,6 +176,7 @@ SCPIResult SCPI_ETSI_TEST_Proc(void){
 
 void SCPI_ETSI_TEST_Send(const void* data, size_t size){
 	if(NULL != data) {
+		// send given message character by character
 		for(int chunk=0; chunk<size; chunk++){
 			const char* wordStart = data;
 			SCPI_ETSI_TEST_USER_PutChar(*(wordStart+chunk));
@@ -174,7 +185,7 @@ void SCPI_ETSI_TEST_Send(const void* data, size_t size){
 }
 
 scpi_result_t SCPI_ETSI_TEST_GetIDN(scpi_t* context){
-	char buffer[200];
+	char buffer[STRING_BUFF_SIZE];
 	if(NULL != context) {
 		const char* description = deviceDesc.idn;
 		if(NULL != description){
@@ -211,9 +222,11 @@ scpi_result_t SCPI_ETSI_TEST_GetPhyCount(scpi_t* context){
 
 scpi_result_t SCPI_ETSI_TEST_GetPhyCapabilities(scpi_t* context){
 	if(NULL != context) {
-		char buffer[256];
+		char buffer[STRING_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			snprintf(buffer, sizeof(buffer), "%"PRIu32",%"PRIu32",%"PRIu16",%"PRIu32",%"PRIu32",%i,%i,%i,%"PRIu16",%"PRIu16",%"PRIu16",%u,%u,%u\n", deviceDesc.phyCapabilities[phy].lowestFrequency,
 					deviceDesc.phyCapabilities[phy].highestFrequency, deviceDesc.phyCapabilities[phy].channelCount, deviceDesc.phyCapabilities[phy].channelBandwidth, deviceDesc.phyCapabilities[phy].baudrate,
@@ -232,7 +245,9 @@ scpi_result_t SCPI_ETSI_TEST_GetLowestFrequency(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT32_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint32_t freq = deviceDesc.phyCapabilities[phy].lowestFrequency;
 			snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", freq);
@@ -248,7 +263,9 @@ scpi_result_t SCPI_ETSI_TEST_GetHighestFrequency(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT32_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint32_t freq = deviceDesc.phyCapabilities[phy].highestFrequency;
 			snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", freq);
@@ -264,7 +281,9 @@ scpi_result_t SCPI_ETSI_TEST_GetChannelCount(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT16_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint16_t channelCount = deviceDesc.phyCapabilities[phy].channelCount;
 			snprintf(buffer, sizeof(buffer), "%"PRIu16"\n", channelCount);
@@ -280,7 +299,9 @@ scpi_result_t SCPI_ETSI_TEST_GetChannelBandwidth(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT32_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint32_t channelBandwidth = deviceDesc.phyCapabilities[phy].channelBandwidth;
 			snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", channelBandwidth);
@@ -296,7 +317,9 @@ scpi_result_t SCPI_ETSI_TEST_GetBaudrate(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT32_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint32_t baudrate = deviceDesc.phyCapabilities[phy].baudrate;
 			snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", baudrate);
@@ -312,7 +335,9 @@ scpi_result_t SCPI_ETSI_TEST_GetLowestPower(scpi_t* context){
 	if(NULL != context) {
 		char buffer[INT8_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const int8_t power = deviceDesc.phyCapabilities[phy].lowestPower;
 			snprintf(buffer, sizeof(buffer), "%i\n", power);
@@ -328,7 +353,9 @@ scpi_result_t SCPI_ETSI_TEST_GetHighestPower(scpi_t* context){
 	if(NULL != context) {
 		char buffer[INT8_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const int8_t power = deviceDesc.phyCapabilities[phy].highestPower;
 			snprintf(buffer, sizeof(buffer), "%i\n", power);
@@ -344,7 +371,9 @@ scpi_result_t SCPI_ETSI_TEST_GetMinPacketLength(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT16_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint16_t pktLen = deviceDesc.phyCapabilities[phy].minimalPacketLength;
 			snprintf(buffer, sizeof(buffer), "%"PRIu16"\n", pktLen);
@@ -360,7 +389,9 @@ scpi_result_t SCPI_ETSI_TEST_GetMaxPacketLength(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT16_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint16_t pktLen = deviceDesc.phyCapabilities[phy].maximalPacketLength;
 			snprintf(buffer, sizeof(buffer), "%"PRIu16"\n", pktLen);
@@ -376,7 +407,9 @@ scpi_result_t SCPI_ETSI_TEST_GetModulationType(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT8_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint8_t mod = deviceDesc.phyCapabilities[phy].modulationType;
 			snprintf(buffer, sizeof(buffer), "%u\n", mod);
@@ -392,7 +425,9 @@ scpi_result_t SCPI_ETSI_TEST_GetSupportedSignals(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT8_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint8_t signals = deviceDesc.phyCapabilities[phy].supportedSignals;
 			snprintf(buffer, sizeof(buffer), "%u\n", signals);
@@ -408,7 +443,9 @@ scpi_result_t SCPI_ETSI_TEST_GetAntennaCount(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT8_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint8_t antennaCount = deviceDesc.phyCapabilities[phy].antennaCount;
 			snprintf(buffer, sizeof(buffer), "%u\n", antennaCount);
@@ -422,9 +459,11 @@ scpi_result_t SCPI_ETSI_TEST_GetAntennaCount(scpi_t* context){
 
 scpi_result_t SCPI_ETSI_TEST_GetPhyDescription(scpi_t* context){
 	if(NULL != context) {
-		char buffer[100];
+		char buffer[STRING_BUFF_SIZE];
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const char* description = *(deviceDesc.phyDescriptions+phy);
 			if(NULL != description){
@@ -442,10 +481,13 @@ scpi_result_t SCPI_ETSI_TEST_GetChannelList(scpi_t* context){
 	char buffer[1024];
 	if(NULL != context) {
 		int32_t phy;
+		// get phy suffix from command
 		SCPI_CommandNumbers(context, &phy, 1, 0);
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint32_t* channelList = *deviceDesc.phyChannelList;
 			if(NULL != channelList){
+				// print about all channel list
 				for(int channel=0; channel < deviceDesc.phyCapabilities[phy].channelCount; channel++){
 					if(channel == deviceDesc.phyCapabilities[phy].channelCount-1){
 						snprintf(buffer, sizeof(buffer), "%d,%d\n", channel, channelList[channel]);
@@ -467,12 +509,15 @@ scpi_result_t SCPI_ETSI_TEST_GetChannel(scpi_t* context){
 	if(NULL != context) {
 		char buffer[UINT32_BUFF_SIZE];
 		int32_t params[2];
+		// get phy suffix and channel suffix from command
 		SCPI_CommandNumbers(context, params, 2, 0);
 		int32_t phy = params[0];
 		int32_t channelNumber = params[1];
+		// check if phy value is not out of bounds
 		if(phy <= deviceDesc.phyCount-1){
 			const uint32_t* channelList = *deviceDesc.phyChannelList;
 			if(NULL != channelList){
+				// check if channel number is not out of bounds
 				if(channelNumber <= deviceDesc.phyCapabilities[phy].channelCount - 1){
 					const uint32_t channelFreq = channelList[channelNumber];
 					snprintf(buffer, sizeof(buffer), "%"PRIu32"\n", channelFreq);
@@ -488,7 +533,7 @@ scpi_result_t SCPI_ETSI_TEST_GetChannel(scpi_t* context){
 
 scpi_result_t SCPI_ETSI_TEST_GetSettings(scpi_t* context){
 	if(NULL != context) {
-		char buffer[128];
+		char buffer[STRING_BUFF_SIZE];
 		snprintf(buffer, sizeof(buffer), "%u,%"PRIu16",%u,%i,%u,%"PRIu16",%"PRIu16"\n", deviceDesc.phySettings.phyNumber, deviceDesc.phySettings.channelNumber,
 				deviceDesc.phySettings.signalType, deviceDesc.phySettings.power, deviceDesc.phySettings.antennaNumber, deviceDesc.phySettings.perTotalPacketsNumber,
 				deviceDesc.phySettings.perPacketLength);
@@ -502,7 +547,9 @@ scpi_result_t SCPI_ETSI_TEST_GetSettings(scpi_t* context){
 scpi_result_t SCPI_ETSI_TEST_SetPhy(scpi_t* context){
 	if(NULL != context) {
 		uint32_t phy;
+		// get phy number from parser
 		if(SCPI_ParamUInt32(context, &phy, TRUE)){
+			// check if phy value is not out of bounds
 			if(phy <= deviceDesc.phyCount-1){
 				// if yes clear existing settings structure and set new phy
 				memset(&(deviceDesc.phySettings), 0, sizeof(SCPI_ETSI_TEST_PhySettings));
@@ -758,6 +805,7 @@ scpi_result_t SCPI_ETSI_TEST_GetSelectedPERPacketLength(scpi_t* context){
 scpi_result_t SCPI_ETSI_TEST_SetTRXMode(scpi_t* context){
 	if(NULL != context) {
 		uint32_t mode;
+		// get mode number from parser
 		if(SCPI_ParamUInt32(context, &mode, TRUE)){
 			// check if parameter has proper value (0,1 or 2)
 			if(mode == 0 || mode == 1 || mode == 2){
@@ -778,9 +826,11 @@ scpi_result_t SCPI_ETSI_TEST_SetTRXMode(scpi_t* context){
 scpi_result_t SCPI_ETSI_TEST_StartPERTest(scpi_t* context){
 	if(NULL != context) {
 		uint32_t testID;
+		// get test ID from parser
 		if(SCPI_ParamUInt32(context, &testID, TRUE)){
 			// check if any test is running at the moment
 			if(false == SCPI_ETSI_TEST_USER_IsPERTestRunning(&deviceDesc)){
+				// if not, try to start new test
 				if(true == SCPI_ETSI_TEST_USER_StartPERTest(&deviceDesc, testID)){
 					SCPI_ETSI_TEST_Send("OK\n", 3);
 					return SCPI_RES_OK;
@@ -806,7 +856,7 @@ scpi_result_t SCPI_ETSI_TEST_IsPERTestRunning(scpi_t* context){
 
 scpi_result_t SCPI_ETSI_TEST_GetPERTestResult(scpi_t* context){
 	if(NULL != context) {
-		char buffer[100];
+		char buffer[STRING_BUFF_SIZE];
 		SCPI_ETSI_TEST_PERTestResult* testResult = SCPI_ETSI_TEST_USER_GetPERTestResult(&deviceDesc);
 		if(NULL != testResult){
 			snprintf(buffer, sizeof(buffer), "%"PRIu32",%"PRIu16",%"PRIu16"\n", testResult->testID, testResult->totalPacketsNumber, testResult->receivedPacketsNumber);
